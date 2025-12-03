@@ -8,8 +8,6 @@
 </head>
 <body>
     <div class="main-wrapper">
-        <div class="bg-overlay"></div>
-
         <header>
             <h1><span class="red-ink">狼</span>烟起 · 深宅夜话</h1>
             <div id="status-bar">等待开局...</div>
@@ -26,10 +24,13 @@
 
         <footer>
             <div class="role-info" id="my-role-display">身份: 迷雾中</div>
+            
+            <div class="action-area" id="action-buttons-area">
+                </div>
+
             <div class="action-bar">
                 <button id="start-btn" class="ink-btn">抽取身份并入局</button>
-                <button id="mic-btn" class="ink-btn hidden">按住说话</button>
-                <div id="mic-status" class="hidden">...</div>
+                <button id="mic-btn" class="ink-btn hidden" disabled>按住说话</button>
             </div>
         </footer>
     </div>
