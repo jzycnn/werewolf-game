@@ -1,7 +1,0 @@
-{
-  "name": "game-api",
-  "runtime": "EdgeOne",
-  "handler": "game-api.js", 
-  "timeout": 10,
-  "memory": 128 
-}
