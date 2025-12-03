@@ -1,13 +1,13 @@
 {
-  "pages": {
-    "target": "public",  // 静态文件（HTML/CSS/JS）的目录
+  "pages": { 
+    "target": "public", 
     "build": {
-      "command": "",     // 我们的项目是纯静态的，不需要构建命令
+      "command": "",
       "publish": "public" 
     }
   },
   "functions": {
-    "directory": "edge-functions", // 明确指定函数目录
-    "exclude": []
+    "directory": "edge-functions",
+    "exclude": [] 
   }
 }
