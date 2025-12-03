@@ -37,7 +37,7 @@ function startGame() {
     
     // 2. 分配角色
     let shuffled = [...ROLES].sort(() => Math.random() - 0.5);
-    gameState.userIndex = Math.floor(Math.random() * 12);
+    gameState.userIndex = Math.floor(Utility.getRandomAlivePlayerIndex(shuffled.length));
     gameState.dayCount = 0;
     gameState.sheriff = null;
     
@@ -91,7 +91,6 @@ function createComplexSystemPrompt(user) {
     }).join('; ');
     
     const wolfPartners = gameState.players.filter(p => p.role === '狼人').map(p => p.id);
-    const goodSide = gameState.players.filter(p => p.role !== '狼人').map(p => p.id);
 
     return `
     你是一个中国古风狼人杀游戏的【法官】兼【所有AI玩家】的大脑。
@@ -106,7 +105,7 @@ function createComplexSystemPrompt(user) {
 
     【获胜条件】
     好人方 (村民+神民) 获胜：所有狼人出局。
-    狼人方 获胜：屠边制，杀死所有神民(${gameState.players.filter(p => p.role !== '狼人' && p.role !== '村民').map(p => p.id)}) 或所有村民(${gameState.players.filter(p => p.role === '村民').map(p => p.id)}) 出局。
+    狼人方 获胜：屠边制，杀死所有神民 或所有村民出局。
 
     【核心规则总结】
     - 警长：拥有1.5票，可决定发言顺序，警徽可移交。
@@ -119,25 +118,25 @@ function createComplexSystemPrompt(user) {
     夜晚流程：(1)狼人行动 -> (2)女巫行动 -> (3)预言家行动 -> (4)猎人/白痴确认。
     白天流程：(1)宣布死讯 -> (2)警长竞选 (第1/2天) -> (3)发言 -> (4)投票放逐 -> (5)出局者留遗言/猎人开枪。
     
-    【你的任务】
-    1. **严格遵循**上述流程和规则。
-    2. 法官主持词：通过 "judge_speak" 输出。
-    3. AI玩家发言：通过 "ai_speak" 输出。
-    4. **阶段控制**：
-       - 当法官或AI发言/行动完毕，但流程还没到用户发言或行动时，**必须**返回 "next_phase": "wait_for_next_step"，等待用户点击“下一步”按钮。
-       - 需要用户发言时，返回 "next_phase": "user_turn" (显示麦克风)。
-       - 需要用户技能/投票时，返回具体的行动阶段名（如 "kill_target", "seer_check", "vote"）并提供存活 "targets" 列表。
+    【***关键指令：信息隔离与法官主持优化***】
+    1. **私密信息 (Night Actions, Reasons for Actions):**
+       - 狼人击杀目标、女巫用药目标及理由、预言家查验目标及结果，以及AI玩家的内心动机和决策过程，**必须且只能**出现在 JSON 的 **"thought"** 字段中。
+       - **绝对禁止**将这些私密信息（例如：“狼人刀了5号”、“女巫决定不救”、“预言家验出6号是好人”）写入 **"judge_speak"**, **"ai_speak"**, 或 **"game_event"** 字段。
+    2. **公开信息 (Judge Narration):**
+       - **"judge_speak"** 仅能包含：流程引导 (如 “天黑请闭眼”, “天亮了”) 和公开结果 (如 “昨夜平安夜/有人出局”, “X号玩家出局”)。
+       - **移除所有**关于游戏机制的 **“手势”、“编号提示”** 等元指令。法官应使用**自然语言**进行引导（例如，指导女巫环节：“女巫请睁眼，昨夜X号玩家被击杀。请选择是否使用解药或毒药，目标请点击号码，弃用请点击放弃按钮”）。
+    3. **AI玩家发言**：AI玩家的发言内容（"ai_speak"）必须符合其当前角色身份和游戏阶段，**绝不能**透露底牌或夜间信息。
     
     【输出格式】
     你必须只返回一个 JSON 对象，不要Markdown。
     {
-        "thought": "简短的思维链，决定下一步做什么 (如：现在是狼人环节，1号狼人提议刀5号，我接受了，下一步询问女巫是否用药)",
-        "judge_speak": "法官的主持台词，如果没有则为空字符串",
+        "thought": "简短的思维链，决定下一步做什么。**包含所有AI的夜间行动和私密决策理由。**",
+        "judge_speak": "法官的主持台词，如果没有则为空字符串。**只包含流程引导和公开结果。**",
         "ai_speak": { "seat_id": 3, "content": "3号玩家的发言内容" } (如果没有AI发言则为null),
-        "game_event": "描述发生了什么，例如 '5号死亡', '警长被投出', '警徽流失'",
+        "game_event": "描述发生了什么，例如 '5号死亡', '警长被投出', '警徽流失'。**只包含公开宣布的结果。**",
         "current_phase": "当前游戏阶段（如 Night1, Day1, SheriffElection）",
         "targets": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] (在行动或投票阶段，列出当前存活且可被操作的玩家ID),
-        "next_phase": "下一步阶段：'user_turn', 'vote', 'kill_target', 'seer_check', 'witch_action', 'wait_for_next_step', 'game_over'"
+        "next_phase": "下一步阶段：'user_turn', 'vote', 'kill_target', 'seer_check', 'witch_action', 'game_over', 'wait_for_next_step'"
     }
     
     现在游戏开始，请输出第一夜的开场词，并让用户手动推动流程。
@@ -160,6 +159,19 @@ function renderSeats() {
             skillStatus += p.hasPoison ? ' [毒]' : '';
         }
         div.innerText = `${p.id}号 ${p.isUser ? '(你)' : ''}${sheriffMark}${skillStatus}`;
+        
+        // 标记出局玩家
+        if (!p.alive) {
+            div.style.textDecoration = 'line-through';
+            div.style.opacity = '0.5';
+            div.title = "已出局";
+        }
+        // 标记白痴翻牌玩家
+        if (p.isIdiotFlipped) {
+             div.style.border = '2px dashed #bfa46f'; // 白痴标记
+             div.title = "白痴已翻牌，无投票权";
+        }
+        
         container.appendChild(div);
     });
 }
@@ -195,6 +207,7 @@ async function processGameTurn(userActionDescription, initial = false) {
         const data = await response.json();
         
         let content = data.choices[0].message.content;
+        // Clean up JSON response
         content = content.replace(/```json/g, '').replace(/```/g, '');
         
         const aiResult = JSON.parse(content);
@@ -211,7 +224,7 @@ async function processGameTurn(userActionDescription, initial = false) {
         }
 
         // 2. AI 玩家说话
-        if (aiResult.ai_speak) {
+        if (aiResult.ai_speak && aiResult.ai_speak.content) {
             highlightSeat(aiResult.ai_speak.seat_id);
             addLog("ai", `${aiResult.ai_speak.seat_id}号: ${aiResult.ai_speak.content}`);
             await speakText(`${aiResult.ai_speak.seat_id}号说: ${aiResult.ai_speak.content}`);
@@ -220,9 +233,10 @@ async function processGameTurn(userActionDescription, initial = false) {
         
         // 3. 处理游戏事件（如死亡，警长变更）
         if (aiResult.game_event) {
+            // NOTE: game_event 应该只包含公开信息，如 "5号死亡"
             addLog("system-important", `【事件】 ${aiResult.game_event}`);
-            // TODO: 根据事件更新 gameState.players 的 alive/isIdiotFlipped 状态
-            // 每次状态更新后，重新渲染座位表
+            
+            // 每次宣布事件后，需要更新UI
             renderSeats(); 
         }
 
@@ -254,6 +268,9 @@ async function processGameTurn(userActionDescription, initial = false) {
 
     } catch (e) {
         console.error("游戏回合处理失败:", e);
+        // Log the raw AI response for debugging if possible
+        if(data) console.error("Raw AI Response:", JSON.stringify(data, null, 2));
+
         addLog("system-important", `致命错误，请查看控制台。AI/网络错误信息: ${e.message}`);
         setFlowControlButtons('next'); // 允许用户点击下一步来尝试恢复流程
     } finally {
@@ -319,16 +336,27 @@ if ('webkitSpeechRecognition' in window) {
     // 默认行为：如果不支持语音，用户发言等同于点击下一步
     micBtn.innerText = "浏览器不支持语音";
     micBtn.disabled = true;
+    micBtn.title = "请使用支持Web Speech API的浏览器";
 }
 
 // ====== 语音合成 (TTS) ======
 function initTTS() {
+    // Ensure voices are loaded before trying to use them
+    if (window.speechSynthesis.getVoices().length === 0) {
+        window.speechSynthesis.onvoiceschanged = () => {
+            console.log("TTS voices loaded.");
+        };
+    }
     window.speechSynthesis.cancel();
 }
 
 function speakText(text) {
     return new Promise((resolve) => {
         if (!text) return resolve();
+        
+        // Prevent empty or very short strings from blocking
+        if (text.trim().length < 2) return resolve();
+        
         const u = new SpeechSynthesisUtterance(text);
         u.lang = 'zh-CN';
         u.rate = 1.0; 
@@ -338,6 +366,11 @@ function speakText(text) {
         if (zhVoice) u.voice = zhVoice;
 
         u.onend = resolve;
+        u.onerror = (e) => {
+            console.error("TTS Error:", e);
+            resolve(); // Resolve even on error to unblock the flow
+        };
+        
         window.speechSynthesis.speak(u);
     });
 }
@@ -360,17 +393,23 @@ function renderUserActionButtons(phase, targets) {
         buttonTitle = '狼人请选择击杀目标';
     } else if (phase === 'seer_check' && user.role === '预言家') {
         buttonTitle = '预言家请验人';
-        showSkip = false;
+        // 预言家必须验人，不能跳过
+        showSkip = false; 
     } else if (phase === 'witch_action' && user.role === '女巫') {
         buttonTitle = '女巫请选择目标（或选择放弃）';
+        // 女巫可以弃用
+        showSkip = true; 
     } else if (phase === 'vote' || phase === 'sheriff_vote') {
         buttonTitle = '请投出你的放逐/警长票';
-        showSkip = false;
+        // 投票可以弃票
+        showSkip = true; 
     }
     
     // 确保只显示存活的玩家作为目标，并且是AI提供的targets列表中的玩家
     const availableTargets = gameState.players
         .filter(p => p.alive && targets.includes(p.id))
+        // 确保不能选择自己，除非是特殊情况（如自爆，但自爆是独立按钮）
+        .filter(p => p.id !== user.id) 
         .map(p => p.id);
 
     addLog("system-important", `【${buttonTitle}】请点击选择座位号。`);
@@ -382,6 +421,7 @@ function renderUserActionButtons(phase, targets) {
         btn.innerText = `${targetId}号`;
         
         btn.onclick = () => {
+            // 禁用所有按钮，防止重复点击
             document.querySelectorAll('.action-target-btn').forEach(b => b.disabled = true);
             
             // 构建发送给 AI 的行动文本
@@ -397,12 +437,28 @@ function renderUserActionButtons(phase, targets) {
     if (showSkip) {
         let skipBtn = document.createElement('button');
         skipBtn.className = 'ink-btn action-target-btn';
-        skipBtn.innerText = '放弃行动/弃票';
+        // 根据阶段显示不同的放弃文本
+        skipBtn.innerText = (phase === 'vote' || phase === 'sheriff_vote') ? '弃票' : '放弃行动';
         skipBtn.onclick = () => {
-             processGameTurn(`${user.role}(${user.id}号)选择了放弃行动/弃票`);
+             document.querySelectorAll('.action-target-btn').forEach(b => b.disabled = true);
+             processGameTurn(`${user.role}(${user.id}号)选择了弃权/放弃行动`);
              actionButtonsArea.innerHTML = '';
         };
         actionButtonsArea.appendChild(skipBtn);
+    }
+    
+    // 特殊行动：狼人自爆
+    if (user.role === '狼人' && (phase === 'vote' || phase === 'user_turn')) {
+        let selfDestructBtn = document.createElement('button');
+        selfDestructBtn.className = 'ink-btn action-target-btn';
+        selfDestructBtn.style.backgroundColor = '#5c1b1b';
+        selfDestructBtn.innerText = '狼人自爆';
+        selfDestructBtn.onclick = () => {
+             document.querySelectorAll('.action-target-btn').forEach(b => b.disabled = true);
+             processGameTurn(`狼人(${user.id}号)选择自爆`);
+             actionButtonsArea.innerHTML = '';
+        };
+        actionButtonsArea.appendChild(selfDestructBtn);
     }
 }
 
@@ -429,4 +485,16 @@ function highlightSeat(id) {
 function unhighlightSeat(id) {
     const el = document.getElementById(`seat-${id}`);
     if(el) el.classList.remove('active');
+}
+
+const Utility = {
+    // 确保随机选一个活着的玩家，避免直接返回-1
+    getRandomAlivePlayerIndex: (max) => {
+        let index = Math.floor(Math.random() * max);
+        if (gameState.players.length > 0) {
+            // 简单的检查是否存活，虽然在初始化时所有人都活
+            if (gameState.players[index].alive) return index;
+        }
+        return index;
+    }
 }
