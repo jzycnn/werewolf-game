@@ -269,7 +269,8 @@ async function processGameTurn(userActionDescription, initial = false) {
     } catch (e) {
         console.error("游戏回合处理失败:", e);
         // Log the raw AI response for debugging if possible
-        if(data) console.error("Raw AI Response:", JSON.stringify(data, null, 2));
+        const errorData = data ? JSON.stringify(data, null, 2) : "No data available";
+        console.error("Raw AI Response:", errorData);
 
         addLog("system-important", `致命错误，请查看控制台。AI/网络错误信息: ${e.message}`);
         setFlowControlButtons('next'); // 允许用户点击下一步来尝试恢复流程
@@ -375,6 +376,122 @@ function speakText(text) {
     });
 }
 
+// ====== 女巫 UI 辅助函数 (实现分步的 "是/否" 简化操作) ======
+
+/**
+ * 渲染女巫毒药目标选择按钮
+ * @param {string} antidoteResult - 包含解药结果的行动描述，用于拼接最终行动
+ */
+function renderPoisonTargetButtons(antidoteResult) {
+    const user = gameState.players[gameState.userIndex];
+    actionButtonsArea.innerHTML = ''; // 清空按钮
+    
+    // 毒药目标是所有存活玩家（除了自己）
+    const poisonTargets = gameState.players
+        .filter(p => p.alive && p.id !== user.id) 
+        .map(p => p.id);
+        
+    addLog("system-important", "【毒药目标】请选择毒药目标（点击座位号）。");
+        
+    poisonTargets.forEach(targetId => {
+        let btn = document.createElement('button');
+        btn.className = 'ink-btn action-target-btn';
+        btn.innerText = `${targetId}号`;
+        
+        btn.onclick = () => {
+            document.querySelectorAll('.action-target-btn').forEach(b => b.disabled = true);
+            
+            // 最终行动：解药结果 + 毒药目标
+            const finalAction = antidoteResult + `, 毒药目标是 ${targetId}号`;
+            actionButtonsArea.innerHTML = '';
+            processGameTurn(finalAction);
+        };
+        actionButtonsArea.appendChild(btn);
+    });
+}
+
+/**
+ * 渲染女巫行动UI：分步处理解药和毒药
+ * @param {number[]} targets - 包含昨夜被狼人击杀的目标ID (如果有)
+ */
+function renderWitchActionUI(targets) {
+    const user = gameState.players[gameState.userIndex];
+    // targets[0] 期望是昨夜被击杀的目标ID
+    const killedTargetId = targets.length > 0 ? targets[0] : null; 
+    
+    const statusText = `女巫状态：解药${user.hasAntidote ? '有' : '无'}, 毒药${user.hasPoison ? '有' : '无'}。`;
+    actionButtonsArea.innerHTML = `<div class="status-tip">${statusText}</div>`;
+    
+    // --- Step 2: Poison Decision (在解药决定后调用) ---
+    const renderPoisonDecisionUI = (antidoteResult) => {
+        actionButtonsArea.innerHTML = `<div class="status-tip">${statusText}</div>`;
+        
+        if (!user.hasPoison) {
+            // 毒药已用完，直接结束行动
+            addLog("system-important", "【女巫行动】您的毒药已用完，行动结束。");
+            const finalAction = antidoteResult + ", 毒药已用完";
+            actionButtonsArea.innerHTML = '';
+            processGameTurn(finalAction);
+            return;
+        }
+        
+        // 1. 提示使用毒药
+        addLog("system-important", `【女巫行动 - 毒药】现在请选择是否使用毒药。`);
+        
+        // 2. 毒药 "是" 按钮 (进入目标选择)
+        const yesBtn = document.createElement('button');
+        yesBtn.className = 'ink-btn action-target-btn';
+        yesBtn.innerText = '是 (使用毒药)';
+        yesBtn.onclick = () => {
+             // 进入目标选择 UI
+             renderPoisonTargetButtons(antidoteResult); 
+        };
+        actionButtonsArea.appendChild(yesBtn);
+        
+        // 3. 毒药 "否" 按钮 (结束行动)
+        const noBtn = document.createElement('button');
+        noBtn.className = 'ink-btn action-target-btn';
+        noBtn.innerText = '否 (放弃毒药)';
+        noBtn.onclick = () => {
+            // 最终行动：解药结果 + 毒药"未用"
+            const finalAction = antidoteResult + ", 毒药未用";
+            actionButtonsArea.innerHTML = '';
+            processGameTurn(finalAction);
+        };
+        actionButtonsArea.appendChild(noBtn);
+    };
+
+
+    // === Step 1: Antidote Decision ===
+    if (user.hasAntidote) {
+        if (killedTargetId) {
+            // 狼人有目标，提示女巫救人
+            addLog("system-important", `【女巫行动 - 解药】昨夜 ${killedTargetId} 号玩家被狼人击杀，请选择是否使用解药救治。`);
+            
+            let yesBtn = document.createElement('button');
+            yesBtn.className = 'ink-btn action-target-btn';
+            yesBtn.innerText = '是 (救他)';
+            yesBtn.onclick = () => renderPoisonDecisionUI(`${user.role}(${user.id}号)执行了[witch_action]行动: 解药救了 ${killedTargetId}号`);
+            actionButtonsArea.appendChild(yesBtn);
+
+            let noBtn = document.createElement('button');
+            noBtn.className = 'ink-btn action-target-btn';
+            noBtn.innerText = '否 (不救)';
+            noBtn.onclick = () => renderPoisonDecisionUI(`${user.role}(${user.id}号)执行了[witch_action]行动: 解药未用`);
+            actionButtonsArea.appendChild(noBtn);
+            
+        } else {
+            // 平安夜，无法使用解药
+            addLog("system-important", "【女巫行动 - 解药】昨夜平安夜，无法使用解药。");
+            renderPoisonDecisionUI(`${user.role}(${user.id}号)执行了[witch_action]行动: 解药无法使用(平安夜)`);
+        }
+    } else {
+        // 解药已用完，直接跳过到毒药决策
+        addLog("system-important", "【女巫行动 - 解药】您的解药已用完。");
+        renderPoisonDecisionUI(`${user.role}(${user.id}号)执行了[witch_action]行动: 解药已用完`);
+    }
+}
+
 // ====== 动态按钮渲染和事件处理 ======
 
 function renderUserActionButtons(phase, targets) {
@@ -384,6 +501,13 @@ function renderUserActionButtons(phase, targets) {
     // 隐藏流程按钮，只显示操作按钮
     setFlowControlButtons('hidden');
 
+    // === 女巫逻辑分支：调用新的分步 UI ===
+    if (phase === 'witch_action' && user.role === '女巫') {
+        renderWitchActionUI(targets); 
+        return; // 女巫逻辑已完成，退出
+    }
+    // ====================================
+    
     let buttonTitle = '选择行动目标';
     let actionType = phase; // 使用 phase 作为行动类型
     let showSkip = true;
@@ -395,10 +519,6 @@ function renderUserActionButtons(phase, targets) {
         buttonTitle = '预言家请验人';
         // 预言家必须验人，不能跳过
         showSkip = false; 
-    } else if (phase === 'witch_action' && user.role === '女巫') {
-        buttonTitle = '女巫请选择目标（或选择放弃）';
-        // 女巫可以弃用
-        showSkip = true; 
     } else if (phase === 'vote' || phase === 'sheriff_vote') {
         buttonTitle = '请投出你的放逐/警长票';
         // 投票可以弃票
