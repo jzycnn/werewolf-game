@@ -3,9 +3,9 @@
 // Vercel Functions 使用 Node.js 标准的 req, res 对象
 export default async function handler(req, res) {
     
-    // 1. 设置 CORS 头部 (解决跨域问题)
+    // 1. 设置 CORS 头部
     res.setHeader('Access-Control-Allow-Credentials', true);
-    res.setHeader('Access-Control-Allow-Origin', '*'); // 生产环境请换成你的域名
+    res.setHeader('Access-Control-Allow-Origin', '*'); 
     res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
@@ -22,12 +22,11 @@ export default async function handler(req, res) {
     const apiKey = process.env.DEEPSEEK_API_KEY;
 
     if (!apiKey) {
-        // 确保返回 JSON 错误
         return res.status(500).json({ error: 'Server configuration error: DEEPSEEK_API_KEY is missing.' });
     }
 
     try {
-        // Vercel Node.js 环境下，请求体需要手动解析
+        // Vercel Node.js 环境下，请求体需要通过 req.body 获取
         const requestBody = req.body; 
 
         // 3. 调用 DeepSeek API
@@ -49,7 +48,6 @@ export default async function handler(req, res) {
 
         // 4. 检查 DeepSeek 状态码
         if (!aiResponse.ok) {
-             // DeepSeek API 返回 4xx/5xx 错误
              return res.status(aiResponse.status).json({ 
                 error: `DeepSeek API failed with status ${aiResponse.status}`,
                 detail: aiData 
