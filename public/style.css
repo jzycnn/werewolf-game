@@ -11,7 +11,7 @@ body {
     background-color: var(--paper);
     color: var(--ink);
     height: 100vh;
-    overflow: hidden;
+    overflow: hidden; /* 阻止主页面滚动 */
 }
 
 .main-wrapper {
@@ -53,22 +53,18 @@ header {
 }
 
 .seat.active {
-    background: var(--ink);
-    color: #fff;
+    background: var(--gold);
+    color: var(--ink);
     transform: scale(1.05);
-}
-
-.seat.dead {
-    background: #ccc;
-    text-decoration: line-through;
-    opacity: 0.6;
 }
 
 .seat.user { border: 2px solid var(--blood); }
 
+/* 滚动条和高度限制 */
 .story-box {
     flex: 1;
-    overflow-y: auto;
+    overflow-y: auto; /* 启用垂直滚动条 */
+    max-height: 50vh; /* 限制高度，可根据屏幕调整 */
     padding: 20px;
     background-image: radial-gradient(#d4d1cb 1px, transparent 1px);
     background-size: 20px 20px;
@@ -80,17 +76,39 @@ header {
 .msg.ai { color: #003366; }
 .msg.user { color: var(--blood); text-align: right; }
 .msg.judge { font-weight: bold; color: var(--ink); text-align: center; margin: 20px 0; }
+.msg.system-important { /* 狼人提示和行动提示样式 */
+    background-color: #fff8e8;
+    border-left: 5px solid var(--gold);
+    padding: 10px;
+}
 
 footer {
     padding: 15px;
     border-top: 2px solid var(--ink);
     display: flex;
-    justify-content: space-between;
+    flex-direction: column; /* 垂直排列 */
     align-items: center;
     background: #fff;
 }
 
-.ink-btn {
+.role-info { margin-bottom: 10px; font-weight: bold; }
+
+.action-area {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+    gap: 5px;
+}
+
+.action-bar {
+    width: 100%;
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+}
+
+.ink-btn, .action-target-btn {
     background: var(--ink);
     color: var(--paper);
     border: none;
@@ -99,11 +117,28 @@ footer {
     font-size: 1.2em;
     cursor: pointer;
     box-shadow: 3px 3px 0 var(--blood);
+    transition: all 0.1s;
 }
 
-.ink-btn:active {
+.ink-btn:active, .action-target-btn:active {
     transform: translate(2px, 2px);
     box-shadow: 1px 1px 0 var(--blood);
 }
 
 .hidden { display: none; }
+
+/* 用户回合提示动画 */
+.action-bar.user-turn {
+    border: 2px solid var(--blood);
+    padding: 13px;
+    animation: pulse 1s infinite alternate; /* 呼吸灯效果 */
+}
+
+@keyframes pulse {
+    from {
+        box-shadow: 0 0 5px var(--blood);
+    }
+    to {
+        box-shadow: 0 0 15px var(--blood);
+    }
+}
