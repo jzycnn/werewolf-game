@@ -118,6 +118,13 @@ footer {
     cursor: pointer;
     box-shadow: 3px 3px 0 var(--blood);
     transition: all 0.1s;
+    white-space: nowrap; /* 防止按钮内文字换行 */
+}
+
+.ink-btn:disabled, .action-target-btn:disabled {
+    background: #aaa;
+    box-shadow: 2px 2px 0 #888;
+    cursor: not-allowed;
 }
 
 .ink-btn:active, .action-target-btn:active {
@@ -133,6 +140,12 @@ footer {
     padding: 13px;
     animation: pulse 1s infinite alternate; /* 呼吸灯效果 */
 }
+/* 新增：手动推动流程提示动画 */
+.action-bar.flow-push {
+    border: 2px solid var(--gold);
+    padding: 13px;
+    animation: pulse-gold 1s infinite alternate;
+}
 
 @keyframes pulse {
     from {
@@ -140,5 +153,13 @@ footer {
     }
     to {
         box-shadow: 0 0 15px var(--blood);
+    }
+}
+@keyframes pulse-gold {
+    from {
+        box-shadow: 0 0 5px var(--gold);
+    }
+    to {
+        box-shadow: 0 0 15px var(--gold);
     }
 }
