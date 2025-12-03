@@ -1,7 +1,7 @@
 // ====== 配置区 ======
 // 这里填入你的 Edge Functions 的触发地址 (部署后在 EdgeOne 控制台获取)
 // 本地开发时可能是 http://localhost:8080 类似的地址，上线后是 https://xxx.pages.woa.com/game-api
-const API_ENDPOINT = '/functions/game-api'; 
+const API_ENDPOINT = '/edge-functions/game-api';
 
 // ====== 游戏状态 ======
 const ROLES = [
