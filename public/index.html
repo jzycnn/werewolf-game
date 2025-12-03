@@ -14,23 +14,32 @@
         </header>
 
         <main>
+            <!-- 12人座位表 -->
             <div class="seat-grid" id="seats-area">
-                </div>
+                <!-- JS动态生成座位 -->
+            </div>
             
+            <!-- 消息记录与剧情 (已添加滚动支持) -->
             <div class="story-box" id="story-log">
                 <div class="msg system">>>> 欢迎来到深宅，请调整音量，准备开始...</div>
             </div>
         </main>
 
+        <!-- 底部控制栏 -->
         <footer>
             <div class="role-info" id="my-role-display">身份: 迷雾中</div>
             
+            <!-- 动态技能/投票按钮区域 -->
             <div class="action-area" id="action-buttons-area">
-                </div>
+                <!-- 动态按钮将渲染在这里 -->
+            </div>
 
+            <!-- 操作条 (含麦克风和下一步) -->
             <div class="action-bar">
                 <button id="start-btn" class="ink-btn">抽取身份并入局</button>
+                <!-- 麦克风和下一步默认隐藏，等待游戏阶段触发 -->
                 <button id="mic-btn" class="ink-btn hidden" disabled>按住说话</button>
+                <button id="next-step-btn" class="ink-btn hidden">下一步 >> </button>
             </div>
         </footer>
     </div>
