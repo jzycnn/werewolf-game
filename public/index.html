@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>古风狼人杀 · 迷雾深宅</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="main-wrapper">
+        <div class="bg-overlay"></div>
+
+        <header>
+            <h1><span class="red-ink">狼</span>烟起 · 深宅夜话</h1>
+            <div id="status-bar">等待开局...</div>
+        </header>
+
+        <main>
+            <div class="seat-grid" id="seats-area">
+                </div>
+            
+            <div class="story-box" id="story-log">
+                <div class="msg system">>>> 欢迎来到深宅，请调整音量，准备开始...</div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="role-info" id="my-role-display">身份: 迷雾中</div>
+            <div class="action-bar">
+                <button id="start-btn" class="ink-btn">抽取身份并入局</button>
+                <button id="mic-btn" class="ink-btn hidden">按住说话</button>
+                <div id="mic-status" class="hidden">...</div>
+            </div>
+        </footer>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
