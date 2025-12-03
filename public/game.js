@@ -3,8 +3,10 @@
 // ====== 配置区 ======
 // Vercel Serverless Function 路径
 const API_ENDPOINT = '/api/game-api'; 
+const MANUAL_PUSH_PROMPT = "GO_TO_NEXT_PHASE_MANUAL_PUSH"; // 用户点击“下一步”时发送给AI的信号
 
 // ====== 游戏状态 ======
+// 12人板子：4狼人, 4村民, 预言家, 女巫, 猎人, 白痴
 const ROLES = [
     '狼人', '狼人', '狼人', '狼人',
     '村民', '村民', '村民', '村民',
@@ -12,18 +14,22 @@ const ROLES = [
 ];
 
 let gameState = {
-    players: [], // {id, role, alive, isUser}
+    players: [], // {id, role, alive, isUser, hasBullet, hasPoison, hasAntidote, isIdiotFlipped}
     userIndex: -1,
     dayCount: 0,
     history: [], // 发送给AI的对话历史
-    isProcessing: false
+    isProcessing: false,
+    sheriff: null // 警长ID
 };
 
 // ====== DOM 元素引用 ======
 document.getElementById('start-btn').addEventListener('click', startGame);
+document.getElementById('next-step-btn').addEventListener('click', handleNextStep);
 const storyLog = document.getElementById('story-log');
 const actionBar = document.querySelector('.action-bar');
 const actionButtonsArea = document.getElementById('action-buttons-area');
+const micBtn = document.getElementById('mic-btn');
+const nextStepBtn = document.getElementById('next-step-btn');
 
 function startGame() {
     // 1. 初始化音频上下文
@@ -32,11 +38,19 @@ function startGame() {
     // 2. 分配角色
     let shuffled = [...ROLES].sort(() => Math.random() - 0.5);
     gameState.userIndex = Math.floor(Math.random() * 12);
+    gameState.dayCount = 0;
+    gameState.sheriff = null;
+    
     gameState.players = shuffled.map((role, idx) => ({
         id: idx + 1,
         role: role,
         alive: true,
-        isUser: idx === gameState.userIndex
+        isUser: idx === gameState.userIndex,
+        // 角色状态
+        hasBullet: role === '猎人',
+        hasPoison: role === '女巫',
+        hasAntidote: role === '女巫',
+        isIdiotFlipped: false
     }));
 
     // 3. 渲染座位
@@ -44,12 +58,11 @@ function startGame() {
 
     // 4. 更新UI 和狼人提示
     document.getElementById('start-btn').classList.add('hidden');
-    document.getElementById('mic-btn').classList.remove('hidden');
+    
+    const user = gameState.players[gameState.userIndex];
+    let roleText = `您的身份: ${user.role} (${user.id}号)`;
 
-    const userRole = gameState.players[gameState.userIndex].role;
-    let roleText = `您的身份: ${userRole} (${gameState.userIndex + 1}号)`;
-
-    if (userRole === '狼人') {
+    if (user.role === '狼人') {
         const wolfPartners = gameState.players
             .filter(p => p.role === '狼人' && !p.isUser)
             .map(p => `${p.id}号`);
@@ -62,44 +75,73 @@ function startGame() {
 
     document.getElementById('my-role-display').innerText = roleText;
 
-
     // 5. 构造初始 System Prompt (这是AI的灵魂)
-    const systemPrompt = `
+    const systemPrompt = createComplexSystemPrompt(user);
+    gameState.history = [{ role: "system", content: systemPrompt }];
+    
+    // 6. 触发第一轮
+    processGameTurn("游戏开始，进入第一夜", true); // 强制第一步为手动推动流程
+}
+
+function createComplexSystemPrompt(user) {
+    const playersInfo = gameState.players.map(p => {
+        let status = p.alive ? '存活' : '出局';
+        if (p.isIdiotFlipped) status = '白痴翻牌(无投票)';
+        return `${p.id}号:${p.role} (${status}) ${p.isUser ? '(你)' : ''}`;
+    }).join('; ');
+    
+    const wolfPartners = gameState.players.filter(p => p.role === '狼人').map(p => p.id);
+    const goodSide = gameState.players.filter(p => p.role !== '狼人').map(p => p.id);
+
+    return `
     你是一个中国古风狼人杀游戏的【法官】兼【所有AI玩家】的大脑。
     背景：深宅大院，迷雾重重，局势诡谲。
     
     【游戏配置】
-    12人局：4狼人，4村民，4神(预言家,女巫,猎人,白痴)。
-    用户是 ${gameState.userIndex + 1} 号玩家，身份是 ${userRole}。
+    板子：12人局 (4狼人, 4村民, 预言家, 女巫, 猎人, 白痴)。
+    用户是 ${user.id} 号玩家，身份是 ${user.role}。
     
-    【玩家真实底牌】(严禁在普通发言中直接暴露，除非符合逻辑):
-    ${JSON.stringify(gameState.players.map(p => `${p.id}号:${p.role}`).join(', '))}
+    【玩家真实底牌】(只有法官和狼人团队知晓):
+    ${playersInfo}
 
+    【获胜条件】
+    好人方 (村民+神民) 获胜：所有狼人出局。
+    狼人方 获胜：屠边制，杀死所有神民(${gameState.players.filter(p => p.role !== '狼人' && p.role !== '村民').map(p => p.id)}) 或所有村民(${gameState.players.filter(p => p.role === '村民').map(p => p.id)}) 出局。
+
+    【核心规则总结】
+    - 警长：拥有1.5票，可决定发言顺序，警徽可移交。
+    - 女巫：全程不可自救，解药和毒药不能同晚使用，解药用完不告知死讯。女巫状态：解药${user.role === '女巫' && user.hasAntidote ? '有' : '无'}, 毒药${user.role === '女巫' && user.hasPoison ? '有' : '无'}。
+    - 猎人：被刀死或公投出局可翻牌带人（女巫毒死除外）。
+    - 白痴：被公投出局可翻牌留场发言但无投票权。
+    - 狼人：夜间击杀一人，白天可自爆跳过所有环节直接天黑（有30s遗言或夜间指刀二选一）。
+    
+    【游戏流程指导】
+    夜晚流程：(1)狼人行动 -> (2)女巫行动 -> (3)预言家行动 -> (4)猎人/白痴确认。
+    白天流程：(1)宣布死讯 -> (2)警长竞选 (第1/2天) -> (3)发言 -> (4)投票放逐 -> (5)出局者留遗言/猎人开枪。
+    
     【你的任务】
-    1. 控制游戏流程 (天黑->狼人行动->女巫->预言家->天亮->发言->投票)。
-    2. 扮演法官：通过 "judge_speak" 字段输出主持词，风格要古朴、悬疑。
-    3. 扮演AI玩家：轮到AI发言时，通过 "ai_speak" 输出内容。
-    4. 阶段控制：在需要用户（${gameState.userIndex + 1}号）发言时，返回 "next_phase": "user_turn"。在需要用户进行技能操作时，返回对应的阶段名称和可操作目标。
+    1. **严格遵循**上述流程和规则。
+    2. 法官主持词：通过 "judge_speak" 输出。
+    3. AI玩家发言：通过 "ai_speak" 输出。
+    4. **阶段控制**：
+       - 当法官或AI发言/行动完毕，但流程还没到用户发言或行动时，**必须**返回 "next_phase": "wait_for_next_step"，等待用户点击“下一步”按钮。
+       - 需要用户发言时，返回 "next_phase": "user_turn" (显示麦克风)。
+       - 需要用户技能/投票时，返回具体的行动阶段名（如 "kill_target", "seer_check", "vote"）并提供存活 "targets" 列表。
     
     【输出格式】
-    你必须只返回一个 JSON 对象，不要Markdown。格式如下：
+    你必须只返回一个 JSON 对象，不要Markdown。
     {
-        "thought": "简短的思维链，决定下一步做什么",
+        "thought": "简短的思维链，决定下一步做什么 (如：现在是狼人环节，1号狼人提议刀5号，我接受了，下一步询问女巫是否用药)",
         "judge_speak": "法官的主持台词，如果没有则为空字符串",
         "ai_speak": { "seat_id": 3, "content": "3号玩家的发言内容" } (如果没有AI发言则为null),
-        "game_event": "描述发生了什么，例如 '5号死亡'",
-        "current_phase": "当前游戏阶段（如 Day, Night, Vote, SeerAction）",
-        "targets": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] (在行动或投票阶段，列出所有存活玩家的ID),
-        "next_phase": "用于前端判断阶段：'user_turn', 'vote', 'kill_target', 'seer_check', 'continue'"
+        "game_event": "描述发生了什么，例如 '5号死亡', '警长被投出', '警徽流失'",
+        "current_phase": "当前游戏阶段（如 Night1, Day1, SheriffElection）",
+        "targets": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12] (在行动或投票阶段，列出当前存活且可被操作的玩家ID),
+        "next_phase": "下一步阶段：'user_turn', 'vote', 'kill_target', 'seer_check', 'witch_action', 'wait_for_next_step', 'game_over'"
     }
     
-    现在游戏开始，请输出第一夜的开场词。
+    现在游戏开始，请输出第一夜的开场词，并让用户手动推动流程。
     `;
-
-    gameState.history = [{ role: "system", content: systemPrompt }];
-    
-    // 6. 触发第一轮
-    processGameTurn("游戏开始，进入第一夜");
 }
 
 function renderSeats() {
@@ -109,21 +151,33 @@ function renderSeats() {
         let div = document.createElement('div');
         div.className = `seat ${p.isUser ? 'user' : ''}`;
         div.id = `seat-${p.id}`;
-        div.innerText = `${p.id}号 ${p.isUser ? '(你)' : ''}`;
+        // 显示警长标记
+        let sheriffMark = p.id === gameState.sheriff ? ' (警)' : '';
+        // 显示技能状态
+        let skillStatus = '';
+        if (p.role === '女巫') {
+            skillStatus += p.hasAntidote ? ' [解]' : '';
+            skillStatus += p.hasPoison ? ' [毒]' : '';
+        }
+        div.innerText = `${p.id}号 ${p.isUser ? '(你)' : ''}${sheriffMark}${skillStatus}`;
         container.appendChild(div);
     });
 }
 
 // ====== AI 核心交互 ======
-async function processGameTurn(userActionDescription) {
+async function processGameTurn(userActionDescription, initial = false) {
     if (gameState.isProcessing) return;
     gameState.isProcessing = true;
     updateStatus("天机推演中...");
     
-    setUserTurn(false); // 在处理过程中禁用用户操作
+    // 隐藏所有流程控制按钮
+    setFlowControlButtons('hidden');
+    actionButtonsArea.innerHTML = '';
 
     // 添加用户动作到历史
-    gameState.history.push({ role: "user", content: userActionDescription });
+    if (!initial) {
+        gameState.history.push({ role: "user", content: userActionDescription });
+    }
 
     try {
         // 请求 Vercel Serverless Function
@@ -164,42 +218,76 @@ async function processGameTurn(userActionDescription) {
             unhighlightSeat(aiResult.ai_speak.seat_id);
         }
         
-        // 3. 处理游戏事件（如死亡）
+        // 3. 处理游戏事件（如死亡，警长变更）
         if (aiResult.game_event) {
             addLog("system-important", `【事件】 ${aiResult.game_event}`);
+            // TODO: 根据事件更新 gameState.players 的 alive/isIdiotFlipped 状态
+            // 每次状态更新后，重新渲染座位表
+            renderSeats(); 
         }
 
         // 4. 处理用户行动阶段
         const nextPhase = aiResult.next_phase;
         
         if (nextPhase === "user_turn") {
-            // 提示用户可以自由发言
-            setUserTurn(true);
-            actionButtonsArea.innerHTML = '';
-        } else if (nextPhase === "kill_target" || nextPhase === "vote" || nextPhase === "seer_check" || nextPhase === "witch_action") {
-            // 提示用户需要点击按钮进行技能操作或投票
-            setUserTurn(true);
+            // 提示用户可以自由发言 (显示麦克风)
+            setFlowControlButtons('mic');
+            updateStatus(`【${aiResult.current_phase}】轮到你(${gameState.players[gameState.userIndex].id}号)发言`);
+        } else if (nextPhase === "wait_for_next_step") {
+            // 提示用户点击下一步推动流程 (显示下一步按钮)
+            setFlowControlButtons('next');
+            updateStatus(`【${aiResult.current_phase}】请点击下一步继续游戏流程`);
+        } else if (['kill_target', 'seer_check', 'witch_action', 'vote', 'sheriff_vote'].includes(nextPhase)) {
+            // 提示用户需要点击按钮进行技能操作或投票 (显示技能按钮)
             renderUserActionButtons(nextPhase, aiResult.targets || []);
+            setFlowControlButtons('action'); // 隐藏麦克风和下一步
+            updateStatus(`【${aiResult.current_phase}】轮到你行动`);
+        } else if (nextPhase === "game_over") {
+            setFlowControlButtons('hidden');
+            updateStatus("游戏结束！");
+            addLog("judge", "游戏结束，请查看胜负结果！", "system-important");
         } else {
-            // 继续自动推进流程
-            setUserTurn(false);
-            actionButtonsArea.innerHTML = '';
-            setTimeout(() => {
-                processGameTurn("继续流程");
-            }, 1000);
+            // 兜底：如果 AI 返回了未知的 next_phase，强制推动下一步
+            setFlowControlButtons('next');
+            updateStatus("【未知阶段】请点击下一步继续流程");
         }
 
     } catch (e) {
         console.error("游戏回合处理失败:", e);
         addLog("system-important", `致命错误，请查看控制台。AI/网络错误信息: ${e.message}`);
+        setFlowControlButtons('next'); // 允许用户点击下一步来尝试恢复流程
     } finally {
         gameState.isProcessing = false;
     }
 }
 
+// ====== 流程控制按钮处理 ======
+
+function handleNextStep() {
+    // 点击下一步按钮，向AI发送信号，要求继续流程
+    if (!gameState.isProcessing) {
+        processGameTurn(MANUAL_PUSH_PROMPT);
+    }
+}
+
+function setFlowControlButtons(mode) {
+    micBtn.classList.add('hidden');
+    nextStepBtn.classList.add('hidden');
+    actionBar.classList.remove('user-turn');
+    actionBar.classList.remove('flow-push');
+    
+    if (mode === 'mic') {
+        micBtn.classList.remove('hidden');
+        actionBar.classList.add('user-turn');
+        micBtn.disabled = false;
+    } else if (mode === 'next') {
+        nextStepBtn.classList.remove('hidden');
+        actionBar.classList.add('flow-push');
+    }
+    // 'action' 模式由 renderUserActionButtons 处理，这里只需隐藏 mic/next
+}
 
 // ====== 语音转文字 (STT) - Web Speech API ======
-const micBtn = document.getElementById('mic-btn');
 let recognition;
 
 if ('webkitSpeechRecognition' in window) {
@@ -208,7 +296,7 @@ if ('webkitSpeechRecognition' in window) {
     recognition.continuous = false;
     
     micBtn.onmousedown = () => {
-        if (!micBtn.disabled) {
+        if (!micBtn.disabled && !gameState.isProcessing) {
             recognition.start();
             micBtn.innerText = "正在聆听...";
             micBtn.style.background = "#8f1e1e";
@@ -223,11 +311,12 @@ if ('webkitSpeechRecognition' in window) {
 
     recognition.onresult = (event) => {
         const text = event.results[0][0].transcript;
-        addLog("user", `你: ${text}`);
+        addLog("user", `你(${gameState.players[gameState.userIndex].id}号)发言: ${text}`);
         // 将用户的话发给 AI
-        processGameTurn(`用户(${gameState.userIndex+1}号)发言: "${text}"`);
+        processGameTurn(`用户(${gameState.players[gameState.userIndex].id}号)发言: "${text}"`);
     };
 } else {
+    // 默认行为：如果不支持语音，用户发言等同于点击下一步
     micBtn.innerText = "浏览器不支持语音";
     micBtn.disabled = true;
 }
@@ -259,28 +348,27 @@ function renderUserActionButtons(phase, targets) {
     actionButtonsArea.innerHTML = '';
     const user = gameState.players[gameState.userIndex];
     
-    // 隐藏麦克风，聚焦按钮操作
-    document.getElementById('mic-btn').classList.add('hidden');
+    // 隐藏流程按钮，只显示操作按钮
+    setFlowControlButtons('hidden');
 
-    let buttonTitle = '进行投票';
-    let actionType = 'vote';
+    let buttonTitle = '选择行动目标';
+    let actionType = phase; // 使用 phase 作为行动类型
+    let showSkip = true;
 
     // 根据阶段和身份确定行动类型和提示
     if (phase === 'kill_target' && user.role === '狼人') {
         buttonTitle = '狼人请选择击杀目标';
-        actionType = 'kill';
     } else if (phase === 'seer_check' && user.role === '预言家') {
         buttonTitle = '预言家请验人';
-        actionType = 'check';
+        showSkip = false;
     } else if (phase === 'witch_action' && user.role === '女巫') {
-        // 女巫通常需要两个动作：救人或毒人
-        // 简化处理：女巫阶段，先显示救人/不救按钮，如果选择不救/救人成功，再显示毒人/不毒按钮。
-        // 为了简化，这里只做目标选择，AI 需要根据状态处理女巫的药。
-        buttonTitle = '女巫请选择行动目标';
-        actionType = 'witch_target';
-    } 
+        buttonTitle = '女巫请选择目标（或选择放弃）';
+    } else if (phase === 'vote' || phase === 'sheriff_vote') {
+        buttonTitle = '请投出你的放逐/警长票';
+        showSkip = false;
+    }
     
-    // 确保只显示存活的玩家作为目标，并且不包含自己
+    // 确保只显示存活的玩家作为目标，并且是AI提供的targets列表中的玩家
     const availableTargets = gameState.players
         .filter(p => p.alive && targets.includes(p.id))
         .map(p => p.id);
@@ -300,42 +388,25 @@ function renderUserActionButtons(phase, targets) {
             let actionText = `${user.role}(${user.id}号)执行了[${actionType}]行动，目标是 ${targetId}号`;
             
             actionButtonsArea.innerHTML = ''; // 清空按钮区
-            document.getElementById('mic-btn').classList.remove('hidden');
-
             processGameTurn(actionText); 
         };
         actionButtonsArea.appendChild(btn);
     });
     
-    // 如果是女巫，或不想行动，提供一个“放弃”按钮
-    if (user.role !== '村民' && availableTargets.length > 0) {
+    // 提供一个“放弃”按钮或弃票选项
+    if (showSkip) {
         let skipBtn = document.createElement('button');
         skipBtn.className = 'ink-btn action-target-btn';
-        skipBtn.innerText = '放弃行动';
+        skipBtn.innerText = '放弃行动/弃票';
         skipBtn.onclick = () => {
-             processGameTurn(`${user.role}(${user.id}号)选择了放弃行动`);
+             processGameTurn(`${user.role}(${user.id}号)选择了放弃行动/弃票`);
              actionButtonsArea.innerHTML = '';
-             document.getElementById('mic-btn').classList.remove('hidden');
         };
         actionButtonsArea.appendChild(skipBtn);
     }
 }
 
 // ====== 辅助 UI 函数 ======
-
-function setUserTurn(isUserTurn) {
-    if (isUserTurn) {
-        actionBar.classList.add('user-turn');
-        document.getElementById('mic-btn').disabled = false;
-        // 语音提示只在需要发言时触发
-        if (actionButtonsArea.innerHTML === '') { 
-             speakText("现在轮到你发言了。"); 
-        }
-    } else {
-        actionBar.classList.remove('user-turn');
-        document.getElementById('mic-btn').disabled = true;
-    }
-}
 
 function updateStatus(text) {
     document.getElementById('status-bar').innerText = text;
