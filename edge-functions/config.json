@@ -1,0 +1,7 @@
+{
+  "name": "game-api",
+  "runtime": "EdgeOne", // 或 Nodejs 18.x，但EdgeOne运行时更优
+  "handler": "game-api.js", // 指定入口文件
+  "timeout": 10,           // 超时时间（秒），DeepSeek可能需要长一点
+  "memory": 128            // 内存大小
+}
