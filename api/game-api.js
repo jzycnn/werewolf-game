@@ -1,96 +1,66 @@
-// edge-functions/game-api.js - 增强错误处理版本
+// api/game-api.js - Vercel Serverless Function
 
-// 1. 定义一个安全的 Key 获取函数
-// EdgeOne 运行时环境可能直接将环境变量提升为全局变量，但必须使用 try-catch 或 typeof 检查。
-const getApiKey = () => {
-    // 尝试直接访问全局变量（EdgeOne 常见方式）
-    if (typeof DEEPSEEK_API_KEY !== 'undefined' && DEEPSEEK_API_KEY) {
-        return DEEPSEEK_API_KEY;
-    }
-    // 如果直接访问失败，尝试使用 process.env (兼容Node.js)
-    if (typeof process !== 'undefined' && process.env.DEEPSEEK_API_KEY) {
-        return process.env.DEEPSEEK_API_KEY;
-    }
-    return null;
-};
-
-
-async function handleRequest(request) {
-  // 确保 CORS 头部正确设置
-  const corsHeaders = {
-    "Access-Control-Allow-Origin": "*", // 生产环境请换成你的具体域名
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
-  };
-
-  if (request.method === "OPTIONS") {
-    return new Response(null, { headers: corsHeaders });
-  }
-
-  if (request.method !== "POST") {
-    return new Response("Method Not Allowed", { status: 405 });
-  }
-
-  const apiKey = getApiKey();
-
-  // 【最关键的检查】如果 API Key 缺失，返回 JSON 错误，避免 ReferenceError 崩溃。
-  if (!apiKey) {
-      return new Response(JSON.stringify({ error: "DEEPSEEK_API_KEY 未找到。请在 EdgeOne Pages 设置中配置环境变量。" }), {
-          status: 500,
-          headers: { "Content-Type": "application/json", ...corsHeaders }
-      });
-  }
-
-  try {
-    const requestBody = await request.json();
-
-    // 2. 调用 DeepSeek API
-    const aiResponse = await fetch("https://api.deepseek.com/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${apiKey}`
-      },
-      body: JSON.stringify({
-        model: "deepseek-chat",
-        messages: requestBody.messages,
-        temperature: 1.3,
-        response_format: { type: "json_object" } 
-      })
-    });
+// Vercel Functions 使用 Node.js 标准的 req, res 对象
+export default async function handler(req, res) {
     
-    // 3. 检查 DeepSeek 返回的状态码
-    if (!aiResponse.ok) {
-        // 如果 DeepSeek 返回 4xx/5xx 错误，读取其内容并返回给前端，状态码保持不变。
-        const errorDetail = await aiResponse.text();
-        return new Response(JSON.stringify({ 
-            error: `DeepSeek API调用失败，状态码: ${aiResponse.status}`,
-            detail: errorDetail 
-        }), {
-            status: aiResponse.status,
-            headers: { "Content-Type": "application/json", ...corsHeaders }
-        });
+    // 1. 设置 CORS 头部 (解决跨域问题)
+    res.setHeader('Access-Control-Allow-Credentials', true);
+    res.setHeader('Access-Control-Allow-Origin', '*'); // 生产环境请换成你的域名
+    res.setHeader('Access-Control-Allow-Methods', 'POST,OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+    // 处理 OPTIONS 预检请求 (解决 405 Method Not Allowed)
+    if (req.method === 'OPTIONS') {
+        return res.status(200).end();
+    }
+    
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method Not Allowed' });
     }
 
-    // 4. 返回 DeepSeek 的 JSON 数据
-    const aiData = await aiResponse.json();
-    return new Response(JSON.stringify(aiData), {
-      status: 200,
-      headers: { "Content-Type": "application/json", ...corsHeaders },
-    });
+    // 2. 安全获取 API Key
+    const apiKey = process.env.DEEPSEEK_API_KEY;
 
-  } catch (error) {
-    // 捕获请求体解析失败、JSON解析失败等内部错误，并返回 JSON 格式
-    return new Response(JSON.stringify({ 
-        error: "Edge Function 内部处理失败", 
-        detail: error.message 
-    }), { 
-        status: 500,
-        headers: { "Content-Type": "application/json", ...corsHeaders } 
-    });
-  }
+    if (!apiKey) {
+        // 确保返回 JSON 错误
+        return res.status(500).json({ error: 'Server configuration error: DEEPSEEK_API_KEY is missing.' });
+    }
+
+    try {
+        // Vercel Node.js 环境下，请求体需要手动解析
+        const requestBody = req.body; 
+
+        // 3. 调用 DeepSeek API
+        const aiResponse = await fetch("https://api.deepseek.com/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: "deepseek-chat",
+                messages: requestBody.messages,
+                temperature: 1.3,
+                response_format: { type: "json_object" }
+            })
+        });
+
+        const aiData = await aiResponse.json();
+
+        // 4. 检查 DeepSeek 状态码
+        if (!aiResponse.ok) {
+             // DeepSeek API 返回 4xx/5xx 错误
+             return res.status(aiResponse.status).json({ 
+                error: `DeepSeek API failed with status ${aiResponse.status}`,
+                detail: aiData 
+             });
+        }
+        
+        // 5. 成功返回结果
+        return res.status(200).json(aiData);
+
+    } catch (error) {
+        console.error("Vercel Function Internal Error:", error);
+        return res.status(500).json({ error: 'Internal server error during AI processing.', detail: error.message });
+    }
 }
-
-addEventListener("fetch", (event) => {
-  event.respondWith(handleRequest(event.request));
-});
